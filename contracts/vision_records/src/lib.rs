@@ -147,6 +147,8 @@ impl VisionRecordsContract {
         env.storage().persistent().set(&key, &user_data);
         rbac::assign_role(&env, user.clone(), role.clone(), 0);
 
+        rbac::assign_role(&env, user.clone(), role.clone(), 0);
+
         events::publish_user_registered(&env, user, role, name);
 
         Ok(())
@@ -364,3 +366,6 @@ impl VisionRecordsContract {
         rbac::has_permission(&env, &user, &permission)
     }
 }
+
+#[cfg(test)]
+mod test_rbac;
