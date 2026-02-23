@@ -1,6 +1,27 @@
 #![allow(clippy::arithmetic_side_effects)]
 use soroban_sdk::{contracttype, symbol_short, Address, Env, String, Vec};
 
+const TTL_THRESHOLD: u32 = 5184000;
+const TTL_EXTEND_TO: u32 = 10368000;
+
+fn extend_ttl(env: &Env, key: &(soroban_sdk::Symbol, Address)) {
+    env.storage()
+        .persistent()
+        .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
+}
+
+fn extend_ttl_string_key(env: &Env, key: &(soroban_sdk::Symbol, String)) {
+    env.storage()
+        .persistent()
+        .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
+}
+
+fn extend_ttl_u64_key(env: &Env, key: &(soroban_sdk::Symbol, u64)) {
+    env.storage()
+        .persistent()
+        .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -74,6 +95,7 @@ pub fn get_provider(env: &Env, provider: &Address) -> Option<Provider> {
 pub fn set_provider(env: &Env, provider: &Provider) {
     let key = provider_key(&provider.address);
     env.storage().persistent().set(&key, provider);
+    extend_ttl(env, &key);
 }
 
 pub fn add_provider_to_specialty_index(env: &Env, specialty: &String, provider: &Address) {
@@ -87,6 +109,7 @@ pub fn add_provider_to_specialty_index(env: &Env, specialty: &String, provider: 
         providers.push_back(provider.clone());
     }
     env.storage().persistent().set(&key, &providers);
+    extend_ttl_string_key(env, &key);
 }
 
 pub fn remove_provider_from_specialty_index(env: &Env, specialty: &String, provider: &Address) {
@@ -102,6 +125,7 @@ pub fn remove_provider_from_specialty_index(env: &Env, specialty: &String, provi
         }
         if !new_providers.is_empty() {
             env.storage().persistent().set(&key, &new_providers);
+            extend_ttl_string_key(env, &key);
         } else {
             env.storage().persistent().remove(&key);
         }
@@ -145,4 +169,5 @@ pub fn add_provider_id(env: &Env, provider_id: u64, provider: &Address) {
     }
     let id_key = (symbol_short!("PROV_ID"), provider_id);
     env.storage().persistent().set(&id_key, provider);
+    extend_ttl_u64_key(env, &id_key);
 }

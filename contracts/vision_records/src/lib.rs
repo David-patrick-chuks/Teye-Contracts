@@ -1,6 +1,7 @@
 #![no_std]
 pub mod rbac;
 
+pub mod errors;
 pub mod events;
 pub mod provider;
 
@@ -8,11 +9,33 @@ use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, Env, String, Symbol, Vec,
 };
 
+pub use errors::{ContractError, ErrorCategory, ErrorLogEntry, ErrorSeverity};
 pub use provider::{Certification, License, Location, Provider, VerificationStatus};
 
 /// Storage keys for the contract
 const ADMIN: Symbol = symbol_short!("ADMIN");
 const INITIALIZED: Symbol = symbol_short!("INIT");
+
+const TTL_THRESHOLD: u32 = 5184000;
+const TTL_EXTEND_TO: u32 = 10368000;
+
+fn extend_ttl_address_key(env: &Env, key: &(Symbol, Address)) {
+    env.storage()
+        .persistent()
+        .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
+}
+
+fn extend_ttl_u64_key(env: &Env, key: &(Symbol, u64)) {
+    env.storage()
+        .persistent()
+        .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
+}
+
+fn extend_ttl_access_key(env: &Env, key: &(Symbol, Address, Address)) {
+    env.storage()
+        .persistent()
+        .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
+}
 
 pub use rbac::{Permission, Role};
 
@@ -73,25 +96,6 @@ pub struct AccessGrant {
     pub expires_at: u64,
 }
 
-/// Contract errors
-/// Contract errors
-#[soroban_sdk::contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(u32)]
-pub enum ContractError {
-    NotInitialized = 1,
-    AlreadyInitialized = 2,
-    Unauthorized = 3,
-    UserNotFound = 4,
-    RecordNotFound = 5,
-    InvalidInput = 6,
-    AccessDenied = 7,
-    Paused = 8,
-    ProviderNotFound = 9,
-    ProviderAlreadyRegistered = 10,
-    InvalidVerificationStatus = 11,
-}
-
 #[contract]
 pub struct VisionRecordsContract;
 
@@ -141,6 +145,21 @@ impl VisionRecordsContract {
         caller.require_auth();
 
         if !rbac::has_permission(&env, &caller, &Permission::ManageUsers) {
+            let resource_id = String::from_str(&env, "register_user");
+            let context = errors::create_error_context(
+                &env,
+                ContractError::Unauthorized,
+                Some(caller.clone()),
+                Some(resource_id.clone()),
+            );
+            errors::log_error(
+                &env,
+                ContractError::Unauthorized,
+                Some(caller),
+                Some(resource_id),
+                None,
+            );
+            events::publish_error(&env, ContractError::Unauthorized as u32, context);
             return Err(ContractError::Unauthorized);
         }
 
@@ -154,6 +173,7 @@ impl VisionRecordsContract {
 
         let key = (symbol_short!("USER"), user.clone());
         env.storage().persistent().set(&key, &user_data);
+        extend_ttl_address_key(&env, &key);
         rbac::assign_role(&env, user.clone(), role.clone(), 0);
 
         rbac::assign_role(&env, user.clone(), role.clone(), 0);
@@ -168,11 +188,27 @@ impl VisionRecordsContract {
 
     /// Get user information
     pub fn get_user(env: Env, user: Address) -> Result<User, ContractError> {
-        let key = (symbol_short!("USER"), user);
-        env.storage()
-            .persistent()
-            .get(&key)
-            .ok_or(ContractError::UserNotFound)
+        let key = (symbol_short!("USER"), user.clone());
+        if let Some(user_data) = env.storage().persistent().get(&key) {
+            Ok(user_data)
+        } else {
+            let resource_id = String::from_str(&env, "get_user");
+            let context = errors::create_error_context(
+                &env,
+                ContractError::UserNotFound,
+                Some(user.clone()),
+                Some(resource_id.clone()),
+            );
+            errors::log_error(
+                &env,
+                ContractError::UserNotFound,
+                Some(user),
+                Some(resource_id),
+                None,
+            );
+            events::publish_error(&env, ContractError::UserNotFound as u32, context);
+            Err(ContractError::UserNotFound)
+        }
     }
 
     /// Add a vision record
@@ -214,6 +250,7 @@ impl VisionRecordsContract {
 
         let key = (symbol_short!("RECORD"), record_id);
         env.storage().persistent().set(&key, &record);
+        extend_ttl_u64_key(&env, &key);
 
         // Add to patient's record list
         let patient_key = (symbol_short!("PAT_REC"), patient.clone());
@@ -226,6 +263,7 @@ impl VisionRecordsContract {
         env.storage()
             .persistent()
             .set(&patient_key, &patient_records);
+        extend_ttl_address_key(&env, &patient_key);
 
         events::publish_record_added(&env, record_id, patient, provider, record_type);
 
@@ -235,10 +273,26 @@ impl VisionRecordsContract {
     /// Get a vision record by ID
     pub fn get_record(env: Env, record_id: u64) -> Result<VisionRecord, ContractError> {
         let key = (symbol_short!("RECORD"), record_id);
-        env.storage()
-            .persistent()
-            .get(&key)
-            .ok_or(ContractError::RecordNotFound)
+        if let Some(record) = env.storage().persistent().get(&key) {
+            Ok(record)
+        } else {
+            let resource_id = String::from_str(&env, "get_record");
+            let context = errors::create_error_context(
+                &env,
+                ContractError::RecordNotFound,
+                None,
+                Some(resource_id.clone()),
+            );
+            errors::log_error(
+                &env,
+                ContractError::RecordNotFound,
+                None,
+                Some(resource_id),
+                None,
+            );
+            events::publish_error(&env, ContractError::RecordNotFound as u32, context);
+            Err(ContractError::RecordNotFound)
+        }
     }
 
     /// Get all records for a patient
@@ -284,6 +338,7 @@ impl VisionRecordsContract {
 
         let key = (symbol_short!("ACCESS"), patient.clone(), grantee.clone());
         env.storage().persistent().set(&key, &grant);
+        extend_ttl_access_key(&env, &key);
 
         events::publish_access_granted(&env, patient, grantee, level, duration_seconds, expires_at);
 
@@ -396,6 +451,25 @@ impl VisionRecordsContract {
         }
 
         if provider::get_provider(&env, &provider).is_some() {
+            let resource_id = String::from_str(&env, "register_provider");
+            let context = errors::create_error_context(
+                &env,
+                ContractError::ProviderAlreadyRegistered,
+                Some(caller.clone()),
+                Some(resource_id.clone()),
+            );
+            errors::log_error(
+                &env,
+                ContractError::ProviderAlreadyRegistered,
+                Some(caller),
+                Some(resource_id),
+                None,
+            );
+            events::publish_error(
+                &env,
+                ContractError::ProviderAlreadyRegistered as u32,
+                context,
+            );
             return Err(ContractError::ProviderAlreadyRegistered);
         }
 
@@ -511,7 +585,26 @@ impl VisionRecordsContract {
     }
 
     pub fn get_provider(env: Env, provider: Address) -> Result<Provider, ContractError> {
-        provider::get_provider(&env, &provider).ok_or(ContractError::ProviderNotFound)
+        if let Some(provider_data) = provider::get_provider(&env, &provider) {
+            Ok(provider_data)
+        } else {
+            let resource_id = String::from_str(&env, "get_provider");
+            let context = errors::create_error_context(
+                &env,
+                ContractError::ProviderNotFound,
+                Some(provider.clone()),
+                Some(resource_id.clone()),
+            );
+            errors::log_error(
+                &env,
+                ContractError::ProviderNotFound,
+                Some(provider),
+                Some(resource_id),
+                None,
+            );
+            events::publish_error(&env, ContractError::ProviderNotFound as u32, context);
+            Err(ContractError::ProviderNotFound)
+        }
     }
 
     pub fn search_providers_by_specialty(env: Env, specialty: String) -> Vec<Address> {
@@ -546,6 +639,74 @@ impl VisionRecordsContract {
     fn get_provider_address_by_id(env: &Env, provider_id: u64) -> Option<Address> {
         let id_key = (symbol_short!("PROV_ID"), provider_id);
         env.storage().persistent().get(&id_key)
+    }
+
+    pub fn get_error_log(env: Env) -> Vec<ErrorLogEntry> {
+        errors::get_error_log(&env)
+    }
+
+    pub fn get_error_count(env: Env) -> u64 {
+        errors::get_error_count(&env)
+    }
+
+    pub fn clear_error_log(env: Env, caller: Address) -> Result<(), ContractError> {
+        caller.require_auth();
+        if !rbac::has_permission(&env, &caller, &Permission::SystemAdmin) {
+            let resource_id = String::from_str(&env, "clear_error_log");
+            let context = errors::create_error_context(
+                &env,
+                ContractError::Unauthorized,
+                Some(caller.clone()),
+                Some(resource_id.clone()),
+            );
+            errors::log_error(
+                &env,
+                ContractError::Unauthorized,
+                Some(caller),
+                Some(resource_id),
+                None,
+            );
+            events::publish_error(&env, ContractError::Unauthorized as u32, context);
+            return Err(ContractError::Unauthorized);
+        }
+        errors::clear_error_log(&env);
+        Ok(())
+    }
+
+    pub fn retry_operation(
+        env: Env,
+        caller: Address,
+        operation: String,
+        max_retries: u32,
+    ) -> Result<bool, ContractError> {
+        if max_retries == 0 || max_retries > 10 {
+            let resource_id = String::from_str(&env, "retry_operation");
+            let context = errors::create_error_context(
+                &env,
+                ContractError::InvalidInput,
+                Some(caller.clone()),
+                Some(resource_id.clone()),
+            );
+            errors::log_error(
+                &env,
+                ContractError::InvalidInput,
+                Some(caller),
+                Some(resource_id),
+                None,
+            );
+            events::publish_error(&env, ContractError::InvalidInput as u32, context);
+            return Err(ContractError::InvalidInput);
+        }
+        Ok(errors::retry_operation(
+            &env,
+            &caller,
+            &operation,
+            max_retries,
+        ))
+    }
+
+    pub fn reset_retry_count(env: Env, caller: Address, operation: String) {
+        errors::reset_retry_count(&env, &caller, &operation);
     }
 }
 

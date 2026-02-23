@@ -1,3 +1,4 @@
+use crate::errors::ErrorContext;
 use crate::{AccessLevel, RecordType, Role, VerificationStatus};
 use soroban_sdk::{symbol_short, Address, Env, String};
 
@@ -181,5 +182,24 @@ pub fn publish_provider_updated(env: &Env, provider: Address) {
         provider,
         timestamp: env.ledger().timestamp(),
     };
+    env.events().publish(topics, data);
+}
+
+pub fn publish_error(env: &Env, error_code: u32, context: ErrorContext) {
+    let topics = (
+        symbol_short!("ERROR"),
+        context.category.clone(),
+        context.severity.clone(),
+    );
+    let data = (
+        error_code,
+        context.category,
+        context.severity,
+        context.message,
+        context.user,
+        context.resource_id,
+        context.retryable,
+        context.timestamp,
+    );
     env.events().publish(topics, data);
 }
