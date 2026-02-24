@@ -125,7 +125,9 @@ impl ContractError {
             ContractError::Unauthorized
             | ContractError::AccessDenied
             | ContractError::InsufficientPermissions
-            | ContractError::ExpiredAccess => ErrorCategory::Authorization,
+            | ContractError::ExpiredAccess
+            | ContractError::ConsentRequired
+            | ContractError::ConsentExpired => ErrorCategory::Authorization,
             ContractError::UserNotFound
             | ContractError::RecordNotFound
             | ContractError::ProviderNotFound => ErrorCategory::NotFound,

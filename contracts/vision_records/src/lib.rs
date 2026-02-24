@@ -497,7 +497,15 @@ impl VisionRecordsContract {
     /// Get a vision record by ID
     pub fn get_record(env: Env, record_id: u64) -> Result<VisionRecord, ContractError> {
         let key = (symbol_short!("RECORD"), record_id);
-        if let Some(record) = env.storage().persistent().get(&key) {
+        if let Some(record) = env.storage().persistent().get::<_, VisionRecord>(&key) {
+            // Patient can always view own records; admins bypass consent
+            if caller != record.patient
+                && !rbac::has_permission(&env, &caller, &Permission::SystemAdmin)
+            {
+                if !has_active_consent(&env, &record.patient, &caller) {
+                    return Err(ContractError::ConsentRequired);
+                }
+            }
             Ok(record)
         } else {
             let resource_id = String::from_str(&env, "get_record");
@@ -727,6 +735,10 @@ impl VisionRecordsContract {
 
     /// Check access level
     pub fn check_access(env: Env, patient: Address, grantee: Address) -> AccessLevel {
+        if !has_active_consent(&env, &patient, &grantee) {
+            return AccessLevel::None;
+        }
+
         let key = (symbol_short!("ACCESS"), patient, grantee);
 
         if let Some(grant) = env.storage().persistent().get::<_, AccessGrant>(&key) {

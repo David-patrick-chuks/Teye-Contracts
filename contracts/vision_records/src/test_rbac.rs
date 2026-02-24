@@ -148,6 +148,9 @@ fn test_role_delegation() {
         &String::from_str(&env, "Doc"),
     );
 
+    // pt1 grants consent so check_access passes the consent gate
+    client.grant_consent(&pt1, &doctor, &ConsentType::Treatment, &3600);
+
     // pt2 should be able to grant access acting for pt1
     // (caller: pt2, patient: pt1, grantee: doctor)
     client.grant_access(&pt2, &pt1, &doctor, &super::AccessLevel::Read, &3600);
