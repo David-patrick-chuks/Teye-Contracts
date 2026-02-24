@@ -1,5 +1,7 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
+#![allow(clippy::arithmetic_side_effects)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 extern crate alloc;
 pub mod appointment;
 pub mod audit;

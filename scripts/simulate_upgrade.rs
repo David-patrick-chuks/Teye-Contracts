@@ -1,5 +1,5 @@
-use your_crate_name::state_v1::StateV1;
 use your_crate_name::migrate::migrate_v1_to_v2;
+use your_crate_name::state_v1::StateV1;
 
 fn main() {
     println!("--- Simulating Upgrade ---");

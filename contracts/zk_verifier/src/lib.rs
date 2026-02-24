@@ -1,4 +1,5 @@
-#![allow(dead_code, clippy::manual_inspect)]
+#![allow(dead_code, clippy::manual_inspect, clippy::arithmetic_side_effects)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 //! # ZK Verifier Module
 //!
 //! This module provides a Zero-Knowledge (ZK) proof verification system for the Soroban ecosystem.
