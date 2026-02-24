@@ -824,9 +824,12 @@ impl VisionRecordsContract {
             true
         } else {
             let access = Self::check_access(env.clone(), record.patient.clone(), caller.clone());
+            let record_access =
+                Self::check_record_access(env.clone(), record_id, caller.clone());
             access == AccessLevel::Read
                 || access == AccessLevel::Write
                 || access == AccessLevel::Full
+                || record_access != AccessLevel::None
                 || rbac::has_permission(&env, &caller, &Permission::SystemAdmin)
         };
 
