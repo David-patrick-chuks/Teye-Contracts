@@ -1,16 +1,9 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    unused_imports,
-    unused_variables,
-    deprecated
-)]
+#![allow(clippy::unwrap_used, clippy::expect_used, deprecated)]
 #![cfg(test)]
 
 use soroban_sdk::{
-    symbol_short,
     testutils::{Address as _, Events, Ledger},
-    Address, BytesN, Env, IntoVal, TryIntoVal, Vec,
+    Address, BytesN, Env, Vec,
 };
 use zk_verifier::vk::{G1Point, G2Point, VerificationKey};
 use zk_verifier::ZkAccessHelper;
@@ -105,7 +98,7 @@ fn test_valid_proof_verification_and_audit() {
     let admin = Address::generate(&env);
     client.initialize(&admin);
 
-    let vk = setup_vk(&env);
+    let _vk = setup_vk(&env);
 
     let user = Address::generate(&env);
     let resource_id = [2u8; 32];
@@ -158,7 +151,7 @@ fn test_invalid_proof_verification() {
     let admin = Address::generate(&env);
     client.initialize(&admin);
 
-    let vk = setup_vk(&env);
+    let _vk = setup_vk(&env);
 
     let user = Address::generate(&env);
     let resource_id = [3u8; 32];
@@ -235,6 +228,7 @@ fn test_verify_access_cpu_budget_valid_proof() {
     let request =
         ZkAccessHelper::create_request(&env, user, resource_id, proof_a, proof_b, proof_c, &[&pi]);
 
+    #[allow(deprecated)]
     let mut budget = env.budget();
     budget.reset_default();
     budget.reset_tracker();
@@ -284,6 +278,7 @@ fn test_verify_access_cpu_budget_invalid_proof() {
     let request =
         ZkAccessHelper::create_request(&env, user, resource_id, proof_a, proof_b, proof_c, &[&pi]);
 
+    #[allow(deprecated)]
     let mut budget = env.budget();
     budget.reset_default();
     budget.reset_tracker();
@@ -310,7 +305,7 @@ fn test_rate_limit_enforcement_and_reset() {
     let admin = Address::generate(&env);
     client.initialize(&admin);
 
-    let vk = setup_vk(&env);
+    let _vk = setup_vk(&env);
 
     let user = Address::generate(&env);
     let resource_id = [4u8; 32];
@@ -379,7 +374,7 @@ fn test_whitelist_enforcement_and_toggle() {
     let admin = Address::generate(&env);
     client.initialize(&admin);
 
-    let vk = setup_vk(&env);
+    let _vk = setup_vk(&env);
 
     let allowed_user = Address::generate(&env);
     let blocked_user = Address::generate(&env);

@@ -8,7 +8,7 @@
 )]
 
 use super::*;
-use soroban_sdk::testutils::{Address as _, Events, Ledger};
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::Env;
 
 #[test]
@@ -224,7 +224,6 @@ fn test_rate_limit_add_record_and_grant_access() {
     assert!(matches!(err, Ok(ContractError::RateLimitExceeded)));
 
     // Advance time beyond the window and ensure the limit resets
-    use soroban_sdk::testutils::Ledger;
     let current = env.ledger().timestamp();
     env.ledger().set_timestamp(current + 61);
 

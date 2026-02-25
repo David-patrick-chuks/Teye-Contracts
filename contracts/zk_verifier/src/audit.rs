@@ -67,7 +67,13 @@ impl AuditTrail {
     pub fn get_record(env: &Env, user: Address, resource_id: BytesN<32>) -> Option<AuditRecord> {
         let chain: Option<Vec<AuditRecord>> =
             env.storage().persistent().get(&(&user, &resource_id));
-        chain.and_then(|c| c.last())
+        chain.and_then(|c| {
+            if c.is_empty() {
+                None
+            } else {
+                Some(c.get(c.len() - 1).unwrap())
+            }
+        })
     }
 
     /// Fetches the full audit chain for a given user and resource.

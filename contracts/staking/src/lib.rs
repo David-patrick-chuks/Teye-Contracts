@@ -31,6 +31,9 @@ const RATE_DELAY: Symbol = symbol_short!("RATE_DLY");
 const USER_STAKE: Symbol = symbol_short!("STK");
 const USER_RPT_PAID: Symbol = symbol_short!("RPT_PAID");
 const USER_EARNED: Symbol = symbol_short!("ERND");
+// Records the ledger timestamp of a user's first-ever stake deposit.
+// Used by the Governor DAO to compute the time-weighted loyalty multiplier.
+const USER_SINCE: Symbol = symbol_short!("SINCE");
 
 // ── Contract errors ──────────────────────────────────────────────────────────
 
@@ -51,6 +54,7 @@ pub enum ContractError {
     NoPendingRateChange = 11,
     MultisigRequired = 12,
     MultisigError = 13,
+    Paused = 14,
 }
 
 // ── Public-facing types (re-exported for test consumers) ─────────────────────
@@ -149,8 +153,12 @@ impl StakingContract {
     ///
     /// The global reward accumulator is updated first so the staker does not
     /// retroactively earn rewards on the newly deposited tokens.
+    ///
+    /// On a user's very first deposit the current timestamp is recorded under
+    /// `USER_SINCE` so the Governor DAO can later compute their loyalty age.
     pub fn stake(env: Env, staker: Address, amount: i128) -> Result<(), ContractError> {
         let _guard = common::ReentrancyGuard::new(&env);
+        Self::require_not_paused(&env)?;
         Self::require_initialized(&env)?;
         staker.require_auth();
 
@@ -187,6 +195,14 @@ impl StakingContract {
         let new_total = prev_total.saturating_add(amount);
         env.storage().instance().set(&TOTAL_STAKED, &new_total);
 
+        // 4. Record the first-stake timestamp for loyalty age tracking.
+        //    Only written once; subsequent top-ups do not reset the clock.
+        let since_key = (USER_SINCE, staker.clone());
+        if !env.storage().persistent().has(&since_key) {
+            let now = env.ledger().timestamp();
+            env.storage().persistent().set(&since_key, &now);
+        }
+
         events::publish_staked(&env, staker, amount, new_total);
 
         Ok(())
@@ -200,6 +216,7 @@ impl StakingContract {
     /// on the queued amount) but tokens are only returned after the lock
     /// period via `withdraw`.
     pub fn request_unstake(env: Env, staker: Address, amount: i128) -> Result<u64, ContractError> {
+        Self::require_not_paused(&env)?;
         Self::require_initialized(&env)?;
         staker.require_auth();
 
@@ -297,6 +314,7 @@ impl StakingContract {
     /// The contract must hold sufficient reward tokens (funded by the admin).
     pub fn claim_rewards(env: Env, staker: Address) -> Result<i128, ContractError> {
         let _guard = common::ReentrancyGuard::new(&env);
+        Self::require_not_paused(&env)?;
         Self::require_initialized(&env)?;
         staker.require_auth();
 
@@ -434,6 +452,35 @@ impl StakingContract {
     /// Return the details of a specific unstake request.
     pub fn get_unstake_request(env: Env, request_id: u64) -> Result<UnstakeRequest, ContractError> {
         timelock::get_request(&env, request_id).ok_or(ContractError::RequestNotFound)
+    }
+
+    /// Return the ledger timestamp when `staker` made their first deposit.
+    ///
+    /// Returns `0` if the address has never staked.
+    pub fn get_stake_since(env: Env, staker: Address) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&(USER_SINCE, staker))
+            .unwrap_or(0u64)
+    }
+
+    /// Return how many seconds `staker` has been continuously staking.
+    ///
+    /// Used by the Governor DAO to compute the time-weighted loyalty multiplier:
+    /// ```text
+    /// loyalty_mult = 1.0 + min(stake_age_days / 365, 1.0)   // up to 2×
+    /// ```
+    /// Returns `0` if the address has never staked.
+    pub fn get_stake_age(env: Env, staker: Address) -> u64 {
+        let since: u64 = env
+            .storage()
+            .persistent()
+            .get(&(USER_SINCE, staker))
+            .unwrap_or(0u64);
+        if since == 0 {
+            return 0;
+        }
+        env.ledger().timestamp().saturating_sub(since)
     }
 
     pub fn is_initialized(env: Env) -> bool {
@@ -596,11 +643,11 @@ impl StakingContract {
         env: Env,
         caller: Address,
         new_rate: i128,
-        proposal_id: u64,
+        _proposal_id: u64,
     ) -> Result<(), ContractError> {
         Self::require_initialized(&env)?;
         caller.require_auth();
-        Self::require_admin_tier(&env, &caller, &AdminTier::ContractAdmin, "set_reward_rate")?;
+        Self::require_admin_tier(&env, &caller, &AdminTier::Contract, "set_reward_rate")?;
 
         if new_rate < 0 {
             return Err(ContractError::InvalidInput);
@@ -691,11 +738,11 @@ impl StakingContract {
         env: Env,
         caller: Address,
         new_period: u64,
-        proposal_id: u64,
+        _proposal_id: u64,
     ) -> Result<(), ContractError> {
         Self::require_initialized(&env)?;
         caller.require_auth();
-        Self::require_admin_tier(&env, &caller, &AdminTier::ContractAdmin, "set_lock_period")?;
+        Self::require_admin_tier(&env, &caller, &AdminTier::Contract, "set_lock_period")?;
 
         if !multisig::is_legacy_admin_allowed(&env) {
             if proposal_id == 0 {
@@ -756,7 +803,41 @@ impl StakingContract {
         admin_tiers::get_admin_tier(&env, &admin)
     }
 
+    // ── Pause management ──────────────────────────────────────────────────
+
+    /// Pause all state-mutating operations.
+    ///
+    /// Requires at least `ContractAdmin` tier, or legacy admin.
+    pub fn pause(env: Env, caller: Address) -> Result<(), ContractError> {
+        Self::require_initialized(&env)?;
+        caller.require_auth();
+        Self::require_admin_tier(&env, &caller, &AdminTier::ContractAdmin, "pause")?;
+        common::pausable::pause(&env, &caller);
+        Ok(())
+    }
+
+    /// Resume all state-mutating operations.
+    ///
+    /// Requires at least `ContractAdmin` tier, or legacy admin.
+    pub fn unpause(env: Env, caller: Address) -> Result<(), ContractError> {
+        Self::require_initialized(&env)?;
+        caller.require_auth();
+        Self::require_admin_tier(&env, &caller, &AdminTier::ContractAdmin, "unpause")?;
+        common::pausable::unpause(&env, &caller);
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        common::pausable::is_paused(&env)
+    }
+
     // ── Internal helpers ─────────────────────────────────────────────────────
+
+    /// Guard: revert if the contract is paused.
+    fn require_not_paused(env: &Env) -> Result<(), ContractError> {
+        common::pausable::require_not_paused(env).map_err(|_| ContractError::Paused)
+    }
 
     /// Guard: revert if the contract is not yet initialized.
     fn require_initialized(env: &Env) -> Result<(), ContractError> {
