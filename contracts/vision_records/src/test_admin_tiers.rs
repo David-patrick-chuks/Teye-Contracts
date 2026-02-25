@@ -1,7 +1,7 @@
 extern crate std;
 
-use teye_common::AdminTier;
 use soroban_sdk::{testutils::Address as _, Address, Env};
+use teye_common::AdminTier;
 
 use crate::{
     circuit_breaker::PauseScope, ContractError, VisionRecordsContract, VisionRecordsContractClient,

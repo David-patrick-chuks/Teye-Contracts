@@ -14,7 +14,9 @@ use soroban_sdk::contracterror;
 
 // ── Modules ──────────────────────────────────────────────────────────────────
 
+#[allow(clippy::enum_variant_names)]
 pub mod admin_tiers;
+pub mod conflict_resolver;
 #[cfg(feature = "std")]
 pub mod consent;
 pub mod keys;

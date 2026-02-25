@@ -1,5 +1,5 @@
 #![no_std]
-#![allow(clippy::too_many_arguments)]
+#![allow(clippy::too_many_arguments, clippy::large_enum_variant)]
 extern crate alloc;
 pub mod appointment;
 pub mod audit;
@@ -102,9 +102,9 @@ fn has_active_consent(env: &Env, patient: &Address, grantee: &Address) -> bool {
 }
 
 pub use rbac::{
-    create_access_policy, evaluate_access_policies, set_record_sensitivity, set_user_credential,
-    AccessPolicy, CredentialType, Permission, PolicyContext, Role, SensitivityLevel,
-    TimeRestriction,
+    build_eval_context, check_policy_engine, create_access_policy, evaluate_access_policies,
+    set_record_sensitivity, set_user_credential, simulate_policy_check, AccessPolicy,
+    CredentialType, Permission, PolicyContext, Role, SensitivityLevel, TimeRestriction,
 };
 
 #[contracttype]
@@ -447,14 +447,13 @@ impl VisionRecordsContract {
             return Err(ContractError::NotInitialized);
         }
         caller.require_auth();
-        
+
         let admin = Self::get_admin(env.clone())?;
         if caller != admin {
             return Err(ContractError::Unauthorized);
         }
 
-        multisig::configure(&env, signers, threshold)
-            .map_err(|_| ContractError::InvalidInput)
+        multisig::configure(&env, signers, threshold).map_err(|_| ContractError::InvalidInput)
     }
 
     pub fn propose_admin_action(
@@ -482,8 +481,7 @@ impl VisionRecordsContract {
         }
         approver.require_auth();
 
-        multisig::approve(&env, &approver, proposal_id)
-            .map_err(|_| ContractError::Unauthorized)
+        multisig::approve(&env, &approver, proposal_id).map_err(|_| ContractError::Unauthorized)
     }
 
     pub fn get_multisig_config(env: Env) -> Option<multisig::MultisigConfig> {
@@ -2089,6 +2087,86 @@ impl VisionRecordsContract {
     /// Returns the admin tier of the given address, if any.
     pub fn get_admin_tier(env: Env, admin: Address) -> Option<AdminTier> {
         admin_tiers::get_admin_tier(&env, &admin)
+    }
+
+    // ======================== Policy Engine Management ========================
+
+    /// Stores a composable policy definition on-chain.
+    /// Requires SystemAdmin permission or admin tier.
+    pub fn store_policy(
+        env: Env,
+        caller: Address,
+        policy: teye_common::policy_dsl::PolicyDefinition,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        if !Self::has_admin_access(&env, &caller, &AdminTier::ContractAdmin) {
+            return Self::unauthorized(&env, &caller, "store_policy", "admin_tier:ContractAdmin");
+        }
+        teye_common::policy_engine::store_policy(&env, &policy);
+        Ok(())
+    }
+
+    /// Removes a composable policy definition from on-chain storage.
+    /// Requires SystemAdmin permission or admin tier.
+    pub fn remove_policy(
+        env: Env,
+        caller: Address,
+        policy_id: teye_common::policy_dsl::PolicyId,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        if !Self::has_admin_access(&env, &caller, &AdminTier::ContractAdmin) {
+            return Self::unauthorized(&env, &caller, "remove_policy", "admin_tier:ContractAdmin");
+        }
+        teye_common::policy_engine::remove_policy(&env, &policy_id);
+        Ok(())
+    }
+
+    /// Lists all registered policy identifiers.
+    pub fn list_policies(env: Env) -> Vec<teye_common::policy_dsl::PolicyId> {
+        teye_common::policy_engine::list_policies(&env)
+    }
+
+    /// Sets the conflict resolution strategy used by the policy engine.
+    /// Requires SystemAdmin permission or admin tier.
+    pub fn set_policy_resolution_strategy(
+        env: Env,
+        caller: Address,
+        strategy: teye_common::conflict_resolver::ResolutionStrategy,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        if !Self::has_admin_access(&env, &caller, &AdminTier::ContractAdmin) {
+            return Self::unauthorized(
+                &env,
+                &caller,
+                "set_policy_resolution_strategy",
+                "admin_tier:ContractAdmin",
+            );
+        }
+        teye_common::policy_engine::set_resolution_strategy(&env, strategy);
+        Ok(())
+    }
+
+    /// Evaluates the composable policy engine for the calling user.
+    /// Returns true if the policy engine permits the action.
+    pub fn evaluate_policy_engine(
+        env: Env,
+        caller: Address,
+        action: String,
+        resource_id: Option<u64>,
+    ) -> bool {
+        let action_str: alloc::string::String = action.to_string();
+        rbac::check_policy_engine(&env, &caller, &action_str, resource_id)
+    }
+
+    /// Runs a what-if policy simulation without applying changes.
+    pub fn simulate_policy(
+        env: Env,
+        caller: Address,
+        action: String,
+        resource_id: Option<u64>,
+    ) -> teye_common::policy_dsl::SimulationResult {
+        let action_str: alloc::string::String = action.to_string();
+        rbac::simulate_policy_check(&env, &caller, &action_str, resource_id)
     }
 
     // ======================== Internal Helpers ========================
