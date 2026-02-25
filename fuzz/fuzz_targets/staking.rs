@@ -7,7 +7,7 @@ use staking::{StakingContract, StakingContractClient};
 
 #[derive(Arbitrary, Debug)]
 pub enum FuzzAction {
-    Stake { amount: u64, lock_months: u8 },
+    Stake { amount: u64 },
     Unstake { amount: u64 },
     ClaimRewards,
 }
@@ -37,10 +37,7 @@ fuzz_target!(|actions: Vec<FuzzAction>| {
     for (i, action) in actions.into_iter().enumerate() {
         let caller = &users[i % users.len()];
         match action {
-            FuzzAction::Stake {
-                amount,
-                lock_months: _,
-            } => {
+            FuzzAction::Stake { amount } => {
                 let amt = amount as i128;
                 let _ = client.try_stake(caller, &amt);
             }
